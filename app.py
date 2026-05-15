@@ -1,137 +1,128 @@
-from flask import Flask, render_template, request, redirect, session
+from flask import Flask, render_template, request, redirect, url_for, session
 import sqlite3
+import os
 
 app = Flask(__name__)
-app.secret_key = "smartspend"
+app.secret_key = "smartspend_secret"
 
-# HOME
-@app.route('/', methods=['GET', 'POST'])
-def home():
-
-    if 'user' not in session:
-        return redirect('/login')
-
-    conn = sqlite3.connect('expenses.db')
+# ---------- DATABASE INIT ----------
+def init_db():
+    conn = sqlite3.connect("expenses.db")
     cur = conn.cursor()
 
-    if request.method == 'POST':
-        title = request.form['title']
-        amount = float(request.form['amount'])
-        category = request.form['category']
-
-        cur.execute("""
-        INSERT INTO expenses (user, title, amount, category)
-        VALUES (?, ?, ?, ?)
-        """, (session['user'], title, amount, category))
-
-        conn.commit()
-
-    cur.execute("SELECT * FROM expenses WHERE user=?", (session['user'],))
-    expenses = cur.fetchall()
-
-    total = 0
-
-    category_totals = {
-        "Food": 0,
-        "Travel": 0,
-        "Shopping": 0,
-        "Bills": 0,
-        "Entertainment": 0,
-        "Fuel": 0,
-        "Others": 0
-    }
-
-    for e in expenses:
-        total += e[3]
-        if e[4] in category_totals:
-            category_totals[e[4]] += e[3]
-
-    highest_category = max(category_totals, key=category_totals.get)
-
-    conn.close()
-
-    return render_template(
-        "index.html",
-        expenses=expenses,
-        total=total,
-        category_totals=category_totals,
-        highest_category=highest_category
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE,
+        password TEXT
     )
+    """)
 
-
-# SIGNUP
-@app.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-
-        conn = sqlite3.connect('expenses.db')
-        cur = conn.cursor()
-
-        try:
-            cur.execute("INSERT INTO users (username, password) VALUES (?, ?)",
-                        (username, password))
-            conn.commit()
-        except:
-            return "User exists"
-
-        conn.close()
-        return redirect('/login')
-
-    return render_template('signup.html')
-
-
-# LOGIN
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-
-        conn = sqlite3.connect('expenses.db')
-        cur = conn.cursor()
-
-        cur.execute("SELECT * FROM users WHERE username=? AND password=?",
-                    (username, password))
-
-        user = cur.fetchone()
-        conn.close()
-
-        if user:
-            session['user'] = username
-            return redirect('/')
-
-        return "Invalid login"
-
-    return render_template('login.html')
-
-
-# LOGOUT
-@app.route('/logout')
-def logout():
-    session.pop('user', None)
-    return redirect('/login')
-
-
-# DELETE
-@app.route('/delete/<int:id>')
-def delete(id):
-
-    if 'user' not in session:
-        return redirect('/login')
-
-    conn = sqlite3.connect('expenses.db')
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM expenses WHERE id=? AND user=?",
-                (id, session['user']))
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT,
+        name TEXT,
+        amount REAL
+    )
+    """)
 
     conn.commit()
     conn.close()
 
-    return redirect('/')
+init_db()
+
+# ---------- HOME ----------
+@app.route("/")
+def home():
+    if "user" not in session:
+        return redirect("/login")
+
+    conn = sqlite3.connect("expenses.db")
+    cur = conn.cursor()
+
+    cur.execute("SELECT name, amount FROM expenses WHERE user_email=?",
+                (session["user"],))
+    data = cur.fetchall()
+
+    total = sum([i[1] for i in data])
+
+    conn.close()
+
+    return render_template("index.html", expenses=data, total=total)
+
+# ---------- REGISTER ----------
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        email = request.form["email"]
+        password = request.form["password"]
+
+        conn = sqlite3.connect("expenses.db")
+        cur = conn.cursor()
+
+        try:
+            cur.execute("INSERT INTO users (email, password) VALUES (?,?)",
+                        (email, password))
+            conn.commit()
+        except:
+            pass
+
+        conn.close()
+        return redirect("/login")
+
+    return render_template("signup.html")
+
+# ---------- LOGIN ----------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form["email"]
+        password = request.form["password"]
+
+        conn = sqlite3.connect("expenses.db")
+        cur = conn.cursor()
+
+        cur.execute("SELECT * FROM users WHERE email=? AND password=?",
+                    (email, password))
+        user = cur.fetchone()
+
+        conn.close()
+
+        if user:
+            session["user"] = email
+            return redirect("/")
+        else:
+            return "Invalid login"
+
+    return render_template("login.html")
+
+# ---------- ADD EXPENSE ----------
+@app.route("/add", methods=["POST"])
+def add():
+    if "user" not in session:
+        return redirect("/login")
+
+    name = request.form["name"]
+    amount = request.form["amount"]
+
+    conn = sqlite3.connect("expenses.db")
+    cur = conn.cursor()
+
+    cur.execute("INSERT INTO expenses (user_email, name, amount) VALUES (?,?,?)",
+                (session["user"], name, amount))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/")
+
+# ---------- LOGOUT ----------
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
